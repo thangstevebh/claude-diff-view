@@ -1,0 +1,6 @@
+{
+  "name": "diffview",
+  "version": "0.1.0",
+  "description": "A side pane with the git diff, staged changes, recent commits and tool calls of the session.",
+  "types": "./types/index.d.ts"
+}

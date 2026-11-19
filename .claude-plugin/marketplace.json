@@ -1,0 +1,5 @@
+{
+  "name": "claude-diff-view",
+  "owner": { "name": "thangstevebh" },
+  "plugins": [{ "name": "diffview", "source": "./" }]
+}
