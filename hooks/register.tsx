@@ -27,6 +27,8 @@ const calls = atom({ plugin: 'diffview', key: 'calls' } as const, [], {
   shape: 'calls-1',
 })
 const adding = atom({ plugin: 'diffview', key: 'adding' } as const, false)
+const committing = atom({ plugin: 'diffview', key: 'committing' } as const, false)
+const draft = atom({ plugin: 'diffview', key: 'draft' } as const, '')
 
 const git = ($: EngineInterface, args: string[]) =>
   $.process.run(['git', ...args], { timeoutMs: 8000 })
@@ -211,6 +213,78 @@ const refresh = async ($: EngineInterface) => {
   }
 }
 
+const firstLine = (text: string) => text.split('\n').find(l => l.trim()) ?? ''
+
+const stagePath = async ($: EngineInterface, path: string) => {
+  const r = await git($, ['add', '--', path])
+  if (r.exitCode !== 0) {
+    $.ui.toast(`git add failed: ${firstLine(r.stderr)}`)
+  }
+  await refresh($)
+}
+
+const stageAll = async ($: EngineInterface) => {
+  const r = await git($, ['add', '-A'])
+  if (r.exitCode !== 0) {
+    $.ui.toast(`git add failed: ${firstLine(r.stderr)}`)
+  }
+  await refresh($)
+}
+
+const unstagePath = async ($: EngineInterface, path: string) => {
+  let r = await git($, ['restore', '--staged', '--', path])
+  if (r.exitCode !== 0) {
+    r = await git($, ['rm', '--cached', '-q', '--', path])
+  }
+  if (r.exitCode !== 0) {
+    $.ui.toast(`unstage failed: ${firstLine(r.stderr)}`)
+  }
+  await refresh($)
+}
+
+const doCommit = async ($: EngineInterface, message: string) => {
+  const text = message.trim()
+  if (!text) {
+    $.ui.toast('Commit message is empty.')
+
+    return
+  }
+  const r = await $.process.run(['git', 'commit', '-m', text], { timeoutMs: 60000 })
+  if (r.exitCode !== 0) {
+    $.ui.toast(`commit failed: ${firstLine(r.stderr) || firstLine(r.stdout)}`)
+
+    return
+  }
+  $.ui.toast(`Committed: ${firstLine(r.stdout)}`)
+  await update($, draft, () => '')
+  await update($, committing, () => false)
+  await refresh($)
+}
+
+const suggestMessage = async ($: EngineInterface) => {
+  const diff = await git($, ['diff', '--cached', '--no-color'])
+  if (!diff.stdout.trim()) {
+    $.ui.toast('Nothing staged.')
+
+    return
+  }
+  $.ui.toast('Drafting a commit message…')
+  const r = await $.model
+    .complete({
+      model: 'haiku',
+      prompt: `Write a concise git commit message for this staged diff: an imperative subject of at most 72 characters, then an optional short body. Reply with the message only.\n\n${diff.stdout.slice(0, 12000)}`,
+    })
+    .catch(() => undefined)
+  if (!r?.isAnswered) {
+    $.ui.toast('Could not draft a message.')
+
+    return
+  }
+  await update($, draft, () => r.text.trim())
+  await update($, committing, () => true)
+  await $.ui.focus({ requestId: PANE, key: 'commit-msg' }).catch(() => undefined)
+}
+
 const TABS: { id: Tab; label: string; hotkey: string }[] = [
   { id: 'diff', label: 'Diff', hotkey: '1' },
   { id: 'staged', label: 'Staged', hotkey: '2' },
@@ -305,6 +379,9 @@ export const register: Register = on => {
     if (e.element !== 'new-todo' && (await read($, adding))) {
       await update($, adding, () => false)
     }
+    if (e.element !== 'commit-msg' && (await read($, committing))) {
+      await update($, committing, () => false)
+    }
 
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -318,6 +395,8 @@ export const register: Register = on => {
     const recent = await read($, calls)
     const items = await read($, todos)
     const isAdding = await read($, adding)
+    const isCommitting = await read($, committing)
+    const draftText = await read($, draft)
     const at = await read($, cursor)
     const width = Math.max(20, (e.props.bodyColumns ?? 40) - 2)
     const rows = active === 'staged' ? snap.staged : snap.files
@@ -343,6 +422,12 @@ export const register: Register = on => {
       await update($, tab, () => 'todos' as Tab)
       await update($, adding, () => true)
       await $.ui.focus({ requestId: PANE, key: 'new-todo' })
+    }
+    const picked = rows[sel]
+    const startCommit = async () => {
+      await update($, tab, () => 'staged' as Tab)
+      await update($, committing, () => true)
+      await $.ui.focus({ requestId: PANE, key: 'commit-msg' })
     }
     const go = async (id: Tab) => {
       await update($, tab, () => id)
@@ -408,6 +493,46 @@ export const register: Register = on => {
           <Text dimColor> · Enter: mở · a: thêm todo · Esc: về chat</Text>
         </Box>
 
+        {snap.isRepo && active === 'diff' && (
+          <Box>
+            <Button
+              key="stage"
+              label="Stage"
+              hotkey="s"
+              onPress={() => (picked ? void stagePath($, picked.path) : undefined)}
+            />
+            <Text> </Text>
+            <Button key="stage-all" label="Stage all" hotkey="g" onPress={() => void stageAll($)} />
+          </Box>
+        )}
+        {snap.isRepo && active === 'staged' && (
+          <Box flexDirection="column">
+            <Box>
+              <Button
+                key="unstage"
+                label="Unstage"
+                hotkey="u"
+                onPress={() => (picked ? void unstagePath($, picked.path) : undefined)}
+              />
+              <Text> </Text>
+              <Button key="commit" label="Commit" hotkey="c" onPress={() => void startCommit()} />
+              <Text> </Text>
+              <Button key="suggest" label="Suggest" hotkey="m" onPress={() => void suggestMessage($)} />
+            </Box>
+            {isCommitting && (
+              <Input
+                key="commit-msg"
+                autoFocus
+                label="msg"
+                placeholder="Commit message, Enter to commit"
+                value={draftText}
+                submitLabel="commit"
+                onInput={value => void update($, draft, () => value)}
+                onSubmit={value => void doCommit($, value)}
+              />
+            )}
+          </Box>
+        )}
         {!snap.isRepo && <Text dimColor>Not a git repository.</Text>}
 
         {snap.isRepo && (active === 'diff' || active === 'staged') && (

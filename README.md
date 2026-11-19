@@ -18,6 +18,11 @@ Claude edits, writes or runs a command.
     (pending, in progress, done); the change is saved to the task file
   - `a` opens a field on the Todos tab; type a name and press `Enter` to add a
     todo (saved as a task file when the session has a tasks folder)
+  - Diff tab: `s` stages the selected file, `g` stages everything
+  - Staged tab: `u` unstages the selected file, `c` opens a commit message
+    field (`Enter` commits), `m` drafts a message from the staged diff with a
+    small model (it sends the staged diff, up to 12,000 characters) and fills
+    the field for you to edit
   - `r` refreshes, `x` closes the pane
 
 ## Install

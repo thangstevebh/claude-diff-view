@@ -25,6 +25,8 @@ declare module 'claude-code' {
       calls: Shaped<CallRow[]>
       todos: Shaped<TodoRow[]>
       adding: boolean
+      committing: boolean
+      draft: string
     }
   }
 }
